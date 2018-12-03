@@ -30,7 +30,59 @@ namespace simple_router {
 void
 ArpCache::periodicCheckArpRequestsAndCacheEntries()
 {
+  // for each request in queued requests: handleRequest(request)
+  std::list<std::shared_ptr<ArpRequest>>:: iterator reqIt = m_arpRequests.begin();
+  while(reqIt != m_arpRequests.end()) {
+    if((*reqIt)->nTimesSent < 5) {
+      //send another ARP request
+      Buffer newARP(sizeof(ethernet_hdr) + sizeof(arp_hdr));
 
+      ethernet_hdr* newPacketEth = (ethernet_hdr*)((uint8_t*)newARP.data());
+      arp_hdr* newPacketArp = (arp_hdr*)((uint8_t*)newARP.data() + sizeof(ethernet_hdr));
+      const Interface* iface = m_router.findIfaceByName((*reqIt)->packets.front().iface);
+
+      memcpy(newPacketEth->ether_dhost, BroadcastEtherAddr, ETHER_ADDR_LEN);
+      memcpy(newPacketEth->ether_shost, iface->addr.data(), ETHER_ADDR_LEN);
+      newPacketEth->ether_type = htons(ethertype_arp);
+
+
+      newPacketArp->arp_hrd = htons(arp_hrd_ethernet);
+      newPacketArp->arp_pro = htons(ethertype_ip);
+      newPacketArp->arp_op = htons(arp_op_request);
+      newPacketArp->arp_hln = 0x06;
+      newPacketArp->arp_pln = 0x04;
+
+      memcpy(newPacketArp->arp_sha, iface->addr.data(), ETHER_ADDR_LEN);
+      memcpy(newPacketArp->arp_tha, BroadcastEtherAddr, ETHER_ADDR_LEN);
+
+      newPacketArp->arp_sip = iface->ip;
+      newPacketArp->arp_tip = (*reqIt)->ip;
+
+      m_router.sendPacket(newARP, iface->name);
+      (*reqIt)->timeSent = steady_clock::now();
+      (*reqIt)->nTimesSent = (*reqIt)->nTimesSent + 1;
+      ++reqIt;
+    } else {
+      //delete ArpRequest and all pending packets
+      reqIt = m_arpRequests.erase(reqIt);
+    }
+  }
+
+
+
+  // remove all entries marked for remove
+  std::vector<std::list<std::shared_ptr<ArpEntry>>::iterator> forRemoval;
+  std::list<std::shared_ptr<ArpEntry>>::iterator cacheIt = m_cacheEntries.begin();
+  while(cacheIt != m_cacheEntries.end()) {
+    if(!((*cacheIt)->isValid)) {
+      forRemoval.push_back(cacheIt);
+    }
+    ++cacheIt;
+  }
+
+  for(int i = forRemoval.size() -1; i > -1; i--) {
+    m_cacheEntries.erase(forRemoval[i]);
+  }
 }
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////

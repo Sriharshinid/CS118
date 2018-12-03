@@ -28,11 +28,24 @@ namespace simple_router {
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 // IMPLEMENT THIS METHOD
+bool comparator(RoutingTableEntry& f, RoutingTableEntry& s) {
+  return f.mask > s.mask;
+}
 RoutingTableEntry
 RoutingTable::lookup(uint32_t ip) const
 {
+  //Get all m_entries
+  std::list<RoutingTableEntry> entries(m_entries);
+  //sort entries by mask
+  entries.sort(comparator);
 
-  // FILL THIS IN
+  //iterate through the entries and if the masked ip and the masked entry are the same then return that entry
+  std::list<RoutingTableEntry>::const_iterator it = entries.begin();
+  while(it != entries.end()) {
+    if((it->mask & it->dest) == (it->mask & ip))
+      return *it;
+    ++it;
+  }
 
   throw std::runtime_error("Routing entry not found");
 }
