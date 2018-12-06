@@ -40,6 +40,8 @@ public:
    * interface \p inIface are passed in as parameters. The packet is
    * complete with ethernet headers.
    */
+   void sendARPResponse(arp_hdr* arp_head, const Interface* iface);
+   void sendARPRequest(const Buffer& packet, const Interface* ifce);
    void handleARP(const Buffer& packet, const Interface* iface);
    void handleIP(const Buffer& packet, const Interface* iface);
   void

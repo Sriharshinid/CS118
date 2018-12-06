@@ -24,48 +24,48 @@ namespace simple_router {
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 // IMPLEMENT THIS METHOD
+void SimpleRouter::sendARPResponse(arp_hdr* arp_head, const Interface* iface) {
+  //arp request packet
+  //now we must prepare the response
+  if(arp_head->arp_tip != iface->ip) {
+    std::cerr << "This ARP request is not for me!!" << std::endl;
+    return;
+  }
+
+  //prep ARP response packet
+  Buffer newARP(sizeof(arp_hdr) + sizeof(ethernet_hdr));
+  ethernet_hdr* newPacketEth = (ethernet_hdr*)((uint8_t*)newARP.data());
+  arp_hdr* newPacketArp = (arp_hdr*)((uint8_t*)newARP.data() + sizeof(ethernet_hdr));
+
+  memcpy(newPacketEth->ether_dhost, &((arp_head->arp_sha)[0]), ETHER_ADDR_LEN);
+  memcpy(newPacketEth->ether_shost, (iface->addr).data(), ETHER_ADDR_LEN);
+  newPacketEth->ether_type = htons(ethertype_arp);
+
+
+  newPacketArp->arp_hrd = htons(arp_hrd_ethernet);
+  newPacketArp->arp_pro = htons(ethertype_ip);
+  newPacketArp->arp_op = htons(arp_op_reply);
+  newPacketArp->arp_hln = 0x06;
+  newPacketArp->arp_pln = 0x04;
+
+  memcpy(newPacketArp->arp_sha, (iface->addr).data(), ETHER_ADDR_LEN);
+  memcpy(newPacketArp->arp_tha, &((arp_head->arp_sha)[0]), ETHER_ADDR_LEN);
+
+  newPacketArp->arp_sip = iface->ip;
+  newPacketArp->arp_tip = arp_head->arp_sip;
+
+  print_hdr_arp((uint8_t*)(newPacketArp));
+  sendPacket(newARP, iface->name);
+
+}
+
 void SimpleRouter::handleARP(const Buffer& packet, const Interface* iface) {
   arp_hdr* arp_head = (arp_hdr*) (&packet[0] + sizeof(ethernet_hdr));
 
-  // std::cerr << "Printing ARP header: " << std::endl;
-  // print_hdr_arp((uint8_t*)arp_head);
 
   std::cerr << "Here is the opcode: "<< ntohs(arp_head->arp_op) << std::endl;
   if(ntohs(arp_head->arp_op) == arp_op_request) {
-    //arp request packet
-    std::cerr << "This was an ARP request" << std::endl;
-
-    //now we must prepare the response
-    if(arp_head->arp_tip != iface->ip) {
-      std::cerr << "This ARP request is not for me!!" << std::endl;
-      return;
-    }
-
-    //prep ARP response packet
-    Buffer newARP(sizeof(arp_hdr) + sizeof(ethernet_hdr));
-    ethernet_hdr* newPacketEth = (ethernet_hdr*)((uint8_t*)newARP.data());
-    arp_hdr* newPacketArp = (arp_hdr*)((uint8_t*)newARP.data() + sizeof(ethernet_hdr));
-
-    memcpy(newPacketEth->ether_dhost, &((arp_head->arp_sha)[0]), ETHER_ADDR_LEN);
-    memcpy(newPacketEth->ether_shost, (iface->addr).data(), ETHER_ADDR_LEN);
-    newPacketEth->ether_type = htons(ethertype_arp);
-
-
-    newPacketArp->arp_hrd = htons(arp_hrd_ethernet);
-    newPacketArp->arp_pro = htons(ethertype_ip);
-    newPacketArp->arp_op = htons(arp_op_reply);
-    newPacketArp->arp_hln = 0x06;
-    newPacketArp->arp_pln = 0x04;
-
-    memcpy(newPacketArp->arp_sha, (iface->addr).data(), ETHER_ADDR_LEN);
-    memcpy(newPacketArp->arp_tha, &((arp_head->arp_sha)[0]), ETHER_ADDR_LEN);
-
-    newPacketArp->arp_sip = iface->ip;
-    newPacketArp->arp_tip = arp_head->arp_sip;
-
-    print_hdr_arp((uint8_t*)(newPacketArp));
-    sendPacket(newARP, iface->name);
-
+    sendARPResponse(arp_head, iface);
   } else if(ntohs(arp_head->arp_op) == arp_op_reply) {
     std::cerr <<"This was an ARP response" << std::endl;
 
@@ -93,7 +93,7 @@ void SimpleRouter::handleARP(const Buffer& packet, const Interface* iface) {
 
         //send
         sendPacket(it->packet, it->iface);
-        print_hdrs(it->packet.data(), it->packet.size());
+        // print_hdrs(it->packet.data(), it->packet.size());
         ++it;
       }
       m_arp.removeRequest(req);
@@ -104,6 +104,40 @@ void SimpleRouter::handleARP(const Buffer& packet, const Interface* iface) {
   }
 }
 
+void SimpleRouter::sendARPRequest(const Buffer& packet, const Interface* ifce) {
+  Buffer packetTOSend(packet);
+  ip_hdr* ipH = (ip_hdr*)(packetTOSend.data() + sizeof(ethernet_hdr));
+
+  // queue recieved packet and send ARP request
+  m_arp.queueRequest(ipH->ip_dst, packetTOSend, ifce->name );
+
+  Buffer newARP(sizeof(ethernet_hdr) + sizeof(arp_hdr));
+
+  ethernet_hdr* newPacketEth = (ethernet_hdr*)((uint8_t*)newARP.data());
+  arp_hdr* newPacketArp = (arp_hdr*)((uint8_t*)newARP.data() + sizeof(ethernet_hdr));
+
+  memcpy(newPacketEth->ether_dhost, BroadcastEtherAddr, ETHER_ADDR_LEN);
+  memcpy(newPacketEth->ether_shost, ifce->addr.data(), ETHER_ADDR_LEN);
+  newPacketEth->ether_type = htons(ethertype_arp);
+
+
+  newPacketArp->arp_hrd = htons(arp_hrd_ethernet);
+  newPacketArp->arp_pro = htons(ethertype_ip);
+  newPacketArp->arp_op = htons(arp_op_request);
+  newPacketArp->arp_hln = 0x06;
+  newPacketArp->arp_pln = 0x04;
+
+  memcpy(newPacketArp->arp_sha, ifce->addr.data(), ETHER_ADDR_LEN);
+  memcpy(newPacketArp->arp_tha, BroadcastEtherAddr, ETHER_ADDR_LEN);
+
+  newPacketArp->arp_sip = ifce->ip;
+  newPacketArp->arp_tip = ipH->ip_dst;
+
+  std::cerr << "\n\n";
+  print_hdrs(newARP.data(), newARP.size());
+
+  sendPacket(newARP, ifce->name);
+}
 
 void SimpleRouter::handleIP(const Buffer& packet, const Interface* iface) {
   std::cerr << "In IP handler !!!!!" << std::endl;
@@ -161,35 +195,7 @@ void SimpleRouter::handleIP(const Buffer& packet, const Interface* iface) {
     sendPacket(packetTOSend, ifce->name);
 
   } else {
-    // queue recieved packet and send ARP request
-    m_arp.queueRequest(ipH->ip_dst, packetTOSend, ifce->name );
-
-    Buffer newARP(sizeof(ethernet_hdr) + sizeof(arp_hdr));
-
-    ethernet_hdr* newPacketEth = (ethernet_hdr*)((uint8_t*)newARP.data());
-    arp_hdr* newPacketArp = (arp_hdr*)((uint8_t*)newARP.data() + sizeof(ethernet_hdr));
-
-    memcpy(newPacketEth->ether_dhost, BroadcastEtherAddr, ETHER_ADDR_LEN);
-    memcpy(newPacketEth->ether_shost, ifce->addr.data(), ETHER_ADDR_LEN);
-    newPacketEth->ether_type = htons(ethertype_arp);
-
-
-    newPacketArp->arp_hrd = htons(arp_hrd_ethernet);
-    newPacketArp->arp_pro = htons(ethertype_ip);
-    newPacketArp->arp_op = htons(arp_op_request);
-    newPacketArp->arp_hln = 0x06;
-    newPacketArp->arp_pln = 0x04;
-
-    memcpy(newPacketArp->arp_sha, ifce->addr.data(), ETHER_ADDR_LEN);
-    memcpy(newPacketArp->arp_tha, BroadcastEtherAddr, ETHER_ADDR_LEN);
-
-    newPacketArp->arp_sip = ifce->ip;
-    newPacketArp->arp_tip = ipH->ip_dst;
-
-    std::cerr << "\n\n";
-    print_hdrs(newARP.data(), newARP.size());
-
-    sendPacket(newARP, ifce->name);
+    sendARPRequest(packet, ifce);
   }
 }
 
